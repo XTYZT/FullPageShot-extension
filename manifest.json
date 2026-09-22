@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "FullPageShot",
+  "version": "2.2.0",
+  "minimum_chrome_version": "118",
+  "description": "Open source, self-hosted, no tracking. Full-page screenshot of the current tab's entire scrolling height, in one click.",
+  "homepage_url": "https://reimagined.agency",
+  "permissions": ["debugger", "downloads"],
+  "background": { "service_worker": "background.js" },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png",
+    "512": "icons/icon-512.png"
+  },
+  "action": {
+    "default_title": "FullPageShot — Capture the full page screenshot",
+    "default_icon": {
+      "16": "icons/toolbar-16.png",
+      "32": "icons/toolbar-32.png",
+      "48": "icons/toolbar-48.png"
+    }
+  },
+  "commands": {
+    "capture-full-page": {
+      "suggested_key": { "default": "Ctrl+Shift+Y", "mac": "Command+Shift+Y" },
+      "description": "Capture the full page (entire scrolling height)"
+    }
+  }
+}

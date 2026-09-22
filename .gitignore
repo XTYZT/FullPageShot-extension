@@ -1,0 +1,11 @@
+.DS_Store
+*.log
+*.png
+*.zip
+
+# Scratch: logo generator workspace (never ship)
+.logo-workspace/
+
+# Exception: the extension's own icons must ship with it
+!icons/
+!icons/*.png

@@ -1,0 +1,102 @@
+# FullPageShot
+
+One-keypress **full-page screenshots of your current Chrome tab** — a self-hosted
+Manifest V3 extension built on the Chrome DevTools Protocol (`chrome.debugger`).
+No third-party extension code, no analytics, no remote executable code, no screenshot
+uploads: the whole program is two files you can read end-to-end.
+
+Captures the **live tab** you're looking at — logged-in session, current DOM,
+dynamic content — as a single full-height PNG, triggered by a keyboard shortcut
+**or** the toolbar button.
+
+## Why this exists
+
+Chrome has no native single-hotkey or toolbar button for a full-page (scrolling)
+screenshot — only the multi-step DevTools "Capture full size screenshot" command.
+Third-party extensions add a button but require broad, opaque, auto-updating access
+to every page you visit. This extension gives you the button and the hotkey while
+keeping the trust boundary at ~two files you can read end-to-end.
+
+## Install (unpacked)
+
+1. Open `chrome://extensions` and turn on **Developer mode** (top-right).
+2. Click **Load unpacked** and select this folder.
+3. The shortcut suggests **⌘⇧Y** (macOS) / **Ctrl+Shift+Y**. Confirm or rebind at
+   `chrome://extensions/shortcuts`.
+4. Optional: pin the toolbar icon — clicking it does the same as the hotkey.
+
+Capture any page → the PNG lands in your Downloads folder
+(`fullpage-<host>-<timestamp>.png`). A badge flashes `…` while working, then `✓`
+(`⚠` if the page was downscaled or something timed out, `busy` if a capture is
+already running).
+
+## How it works
+
+Over a short-lived `chrome.debugger` (CDP) session on the active tab, in an
+**isolated JavaScript world** (its globals are separate; DOM changes remain visible
+to the page):
+
+1. **Promote lazy media** — copy `data-src`/`data-srcset` → `src`/`srcset` so images
+   load without needing to be scrolled into view (reaches carousel slides too), then
+   wait for load + `decode()` + `document.fonts.ready`.
+2. **Un-clip page-level scroll containers** — release body-scroll and inner-scroll
+   layouts (an `html`/`body` or full-height app-shell `<div>` with its own scrollbar)
+   so their content flows into the document and the true full height can be captured.
+3. **Settle** — wait until the page height stops growing, so async/late-loading
+   sections are included.
+4. **Reveal scroll-triggered content** — inject a removable `img{opacity:1!important}`
+   override and `finish()` any running reveal animations, so below-the-fold fade-ins
+   aren't captured mid-animation at `opacity:0`.
+5. **Hide off-screen overlays** — `position:fixed` elements parked entirely outside the
+   viewport (search popins, drawers) are temporarily `visibility:hidden` so they aren't
+   painted mid-canvas. Sticky elements and visible headers / cookie bars are left alone.
+6. **Capture** at native Retina resolution via `Page.captureScreenshot` with
+   `captureBeyondViewport` (no position mutation). Very tall pages downscale to fit one
+   complete PNG.
+7. **Restore** recorded attributes, styles, and document scroll position on a
+   best-effort basis, then detach. A watchdog attempts cleanup after an interruption;
+   page scripts, animations, and resource loads may have lasting effects.
+
+## Permissions & security
+
+- `debugger` — required to drive CDP and capture beyond the viewport. Powerful, but
+  the code exercising it is **yours**: no analytics, no remote executable code, no
+  screenshot uploads. (Preparing a capture can load images and other resources the
+  page itself requests.) Keep this folder somewhere only you can write.
+- `downloads` — to save the PNG.
+
+The `chrome.debugger` API shows a brief "started debugging this browser" banner
+during each capture; it auto-dismisses on detach.
+
+## Known limitations
+
+Full-page capture that renders the DOM (this extension, and Chrome's own DevTools
+command) has inherent limits on some page types:
+
+- **Virtualized / infinite-scroll feeds** (e.g. image-search feeds) — content that
+  only exists in the DOM while scrolled can't be captured whole by any tool.
+- **Editor/preview shells** — viewport-height editors may populate content only after
+  interaction; capture the published page instead.
+- **Cross-origin iframes** — lazy content inside them isn't reached (same-origin
+  frames and open shadow roots could be added later).
+
+Inner-scroll web-apps and body-scroll layouts — where a `<div>` or the body scrolls
+instead of the document — are handled as of v2.1 by the un-clip step. JS lazy-loaders
+and horizontal carousels are handled as of v2.
+
+## Status
+
+**v2.2.0** (current). Adds a brand icon set (a badge for the store/install, a monoline
+for the toolbar). v2.1 added scroll-container un-clipping that fixes "viewport-only"
+captures on body-scroll / inner-scroll pages, plus a settle step, with overlay-hiding
+narrowed to `position:fixed`. Verified on public websites and authenticated web apps.
+
+## License
+
+GPL-3.0-or-later. Copyright (C) 2026 Reimagined Multimedia KLG. See [`LICENSE`](LICENSE).
+
+If you build on this, your version stays open too, that's the point.
+
+## Made by
+
+[re:imagined agency](https://reimagined.agency): privacy-first tools, Swiss-made.
