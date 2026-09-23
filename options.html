@@ -102,12 +102,12 @@
       transition: border-color .15s ease, background .15s ease;
     }
     .opt:hover { border-color: var(--accent-light); }
-    .opt:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
-    .opt:has(input:checked) {
+    .opt:has(input[type="radio"]:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+    .opt:has(input[type="radio"]:checked) {
       border-color: var(--accent);
       background: var(--surface-2);
     }
-    .opt input {
+    .opt input[type="radio"] {
       appearance: none;
       -webkit-appearance: none;
       width: 20px;
@@ -120,15 +120,45 @@
       position: relative;
       transition: border-color .15s ease;
     }
-    .opt input:checked { border-color: var(--accent); }
-    .opt input:checked::after {
+    .opt input[type="radio"]:checked { border-color: var(--accent); }
+    .opt input[type="radio"]:checked::after {
       content: "";
       position: absolute;
       inset: 3px;
       border-radius: 50%;
       background: var(--grad);
     }
-    .opt .body { min-width: 0; }
+    /* Toggle switch (checkbox) */
+    .opt.toggle { align-items: center; }
+    .switch { position: relative; flex: 0 0 auto; width: 42px; height: 24px; margin-left: 4px; }
+    .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+    .switch .slider { position: absolute; inset: 0; background: var(--border); border-radius: 999px; transition: background .15s ease; }
+    .switch .slider::before {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3);
+      transition: transform .15s ease;
+    }
+    .switch input:checked + .slider { background: var(--accent); }
+    .switch input:checked + .slider::before { transform: translateX(18px); }
+    .switch input:focus-visible + .slider { outline: 2px solid var(--ring); outline-offset: 2px; }
+    /* Subfolder text input (inside the subfolder option) */
+    .subfolder-input {
+      margin-top: 10px;
+      width: 100%;
+      max-width: 280px;
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--text);
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+    }
+    .subfolder-input:focus { border-color: var(--accent); }
+    .subfolder-input::placeholder { color: var(--text-2); }
+    .subfolder-hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-2); }
+    .opt .body { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
     .opt .name {
       font-weight: 600;
       font-size: 14px;
@@ -217,6 +247,53 @@
           Saved
         </span>
       </div>
+    </section>
+
+    <section>
+      <p class="section-label">Save location</p>
+      <fieldset>
+        <legend>Save location</legend>
+
+        <label class="opt">
+          <input type="radio" name="saveLocation" value="downloads">
+          <span class="body">
+            <span class="name">Downloads folder <span class="badge-default">Default</span></span>
+            <span class="desc">Save straight to your Downloads folder with an automatic file name.</span>
+          </span>
+        </label>
+
+        <label class="opt">
+          <input type="radio" name="saveLocation" value="subfolder">
+          <span class="body">
+            <span class="name">Downloads subfolder</span>
+            <span class="desc">Always save into a subfolder of Downloads, with no prompt. For example, "Screenshots" saves to Downloads/Screenshots.</span>
+            <input type="text" id="saveSubfolder" class="subfolder-input" placeholder="Screenshots" spellcheck="false" autocomplete="off" aria-label="Downloads subfolder name">
+            <span class="subfolder-hint">Relative to Downloads. Slashes make nested folders. It cannot point outside Downloads.</span>
+          </span>
+        </label>
+
+        <label class="opt">
+          <input type="radio" name="saveLocation" value="ask">
+          <span class="body">
+            <span class="name">Ask every time</span>
+            <span class="desc">Show the Save As dialog on each capture, so you can choose the folder and file name.</span>
+          </span>
+        </label>
+      </fieldset>
+    </section>
+
+    <section>
+      <p class="section-label">After capture</p>
+      <label class="opt toggle">
+        <span class="body">
+          <span class="name">Copy file path to clipboard</span>
+          <span class="desc">After saving, put the screenshot's full file path on the clipboard, so you can paste it into a terminal, an editor, or a coding agent. The PNG is always saved to Downloads either way.</span>
+        </span>
+        <span class="switch">
+          <input type="checkbox" id="copyPath">
+          <span class="slider"></span>
+        </span>
+      </label>
     </section>
 
     <footer>

@@ -91,6 +91,26 @@ function slug(host) {
   return ((host || "").replace(/[\[\]:]/g, "").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "")) || "page";
 }
 
+// Slugify a URL pathname into a short filename-safe fragment (empty for the site root).
+function slugPath(pathname) {
+  return (pathname || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+}
+
+// Local (not UTC) date + HH MM stamp for readable, sortable file names.
+function stampNow() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return {
+    date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+    time: `${p(d.getHours())}${p(d.getMinutes())}` // HHMM (4 digits)
+  };
+}
+
 // ---------- in-page script (runs in an isolated world; only touches page globals) ----------
 // Defined as a normal function and stringified; it must reference ONLY page APIs + its opts arg.
 async function inPageMain(opts) {
@@ -486,6 +506,106 @@ function isRestrictedUrl(url) {
          (url || "").startsWith("https://chromewebstore.google.com");
 }
 
+// ---------- copy-path-to-clipboard (optional) ----------
+// Resolve the absolute path the download was actually written to. chrome.downloads.download
+// resolves once the download STARTS; the final on-disk filename (incl. any "(1)" dedup) is read
+// back via onChanged / search. Bounded so it never hangs the pipeline.
+function getDownloadFilename(id, maxMs) {
+  return new Promise((resolve) => {
+    let done = false, poll = null, deadline = null;
+    function finish(path) {
+      if (done) return; done = true;
+      try { chrome.downloads.onChanged.removeListener(onCh); } catch (_) {}
+      if (poll) clearInterval(poll);
+      if (deadline) clearTimeout(deadline);
+      resolve(path || "");
+    }
+    // Only trust the filename once the download is actually COMPLETE (a filename can appear while
+    // still in_progress, and the file may not exist yet or may later fail).
+    const check = () => {
+      try {
+        chrome.downloads.search({ id }, (its) => {
+          const it = its && its[0];
+          if (!it) return;
+          if (it.state === "complete") finish(it.filename || "");
+          else if (it.state === "interrupted") finish("");
+        });
+      } catch (_) {}
+    };
+    const onCh = (delta) => {
+      if (!delta || delta.id !== id || !delta.state) return;
+      if (delta.state.current === "complete") check();      // read back the final filename
+      else if (delta.state.current === "interrupted") finish("");
+    };
+    chrome.downloads.onChanged.addListener(onCh);
+    check(); // immediate: catches already-complete AND already-interrupted
+    // Poll below the ~30s service-worker idle timeout: this both detects completion if an event is
+    // missed AND keeps the worker alive (each API call resets the idle timer) while a Save As
+    // dialog is open — without it a long dialog could suspend the worker and drop the pending copy.
+    poll = setInterval(check, 25000);
+    deadline = setTimeout(() => finish(""), maxMs || 8000); // hard upper bound
+  });
+}
+
+let offscreenReady = null;
+async function ensureOffscreen() {
+  try {
+    if (await chrome.offscreen.hasDocument()) return;
+  } catch (_) {}
+  if (!offscreenReady) {
+    offscreenReady = chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["CLIPBOARD"],
+      justification: "Copy the saved screenshot's file path to the clipboard."
+    }).catch((e) => {
+      // A concurrent create can race to "already exists" — treat that as success.
+      if (!/single offscreen|already/i.test(String(e && e.message))) throw e;
+    }).finally(() => { offscreenReady = null; });
+  }
+  await offscreenReady;
+}
+
+async function copyTextToClipboard(text) {
+  await ensureOffscreen();
+  let res;
+  try {
+    res = await chrome.runtime.sendMessage({ type: "fps-copy-text", target: "offscreen", text });
+  } catch (_) {
+    // The offscreen listener may not be ready on the very first copy — brief wait + one retry.
+    await new Promise((r) => setTimeout(r, 150));
+    res = await chrome.runtime.sendMessage({ type: "fps-copy-text", target: "offscreen", text });
+  }
+  if (!res || !res.ok) throw new Error("clipboard copy failed" + (res && res.error ? ": " + res.error : ""));
+}
+
+// Windows reserved device names — Chrome's portable filename validator rejects these on ALL
+// platforms (checking the part before the first dot), so a host like con.com or a subfolder
+// "CON" would make the download silently fail. We neutralize them with an underscore prefix.
+const RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9]|clock\$)$/i; // reserved base (before first dot)
+const RESERVED_FULL = /^(desktop\.ini|thumbs\.db)$/i;                   // reserved full component
+
+// Make one path component safe for chrome.downloads: strip illegal chars, trim leading/trailing
+// dots+spaces AFTER truncation (truncation can recreate a trailing dot), avoid splitting a
+// surrogate pair at the cut, and neutralize reserved names. "" if nothing usable remains.
+function safeComponent(seg, maxLen) {
+  let s = (seg || "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/^[.\s]+/, "").replace(/[.\s]+$/g, "");
+  if (maxLen) s = s.slice(0, maxLen).replace(/[\uD800-\uDBFF]$/, "").replace(/[.\s]+$/g, ""); // no lone high surrogate / trailing dot
+  if (!s || s === "." || s === "..") return "";
+  if (RESERVED_NAME.test(s.split(".")[0]) || RESERVED_FULL.test(s)) s = "_" + s;
+  return s;
+}
+
+// Sanitize a user-supplied Downloads subfolder into a safe relative path (no absolute paths,
+// no "..", no illegal/reserved components). Returns "" if nothing usable remains.
+function sanitizeSubfolder(s) {
+  if (typeof s !== "string") return "";
+  return s.replace(/\\/g, "/").split("/")
+    .map((seg) => safeComponent(seg, 50))
+    .filter(Boolean)
+    .slice(0, 8) // depth guard
+    .join("/");
+}
+
 // ---------- main ----------
 async function captureActiveTab(tabArg) {
   if (capturing) { flash("busy", "#555555"); return; }
@@ -509,13 +629,22 @@ async function captureActiveTab(tabArg) {
     // timeout so a slow/throttled storage read can never stall a capture with the debugger
     // attached. Default faithful on timeout or error.
     let captureMode = "faithful";
+    let copyPath = false;
+    let saveLocation = "downloads"; // "downloads" | "subfolder" | "ask"
+    let saveSubfolder = "";
     try {
       const st = await Promise.race([
-        chrome.storage.sync.get({ captureMode: "faithful" }),
+        chrome.storage.sync.get({ captureMode: "faithful", copyPath: false, saveLocation: "downloads", saveSubfolder: "" }),
         new Promise((r) => setTimeout(() => r(null), 400))
       ]);
-      if (st && st.captureMode === "everything") captureMode = "everything";
+      if (st) {
+        if (st.captureMode === "everything") captureMode = "everything";
+        if (st.copyPath === true) copyPath = true;
+        if (st.saveLocation === "ask" || st.saveLocation === "subfolder") saveLocation = st.saveLocation;
+        if (typeof st.saveSubfolder === "string") saveSubfolder = st.saveSubfolder;
+      }
     } catch (_) {}
+    const saveAs = (saveLocation === "ask"); // show the Save As dialog per capture
 
     try {
       await chrome.debugger.attach(target, PROTO);
@@ -537,7 +666,7 @@ async function captureActiveTab(tabArg) {
     contextId = iso.executionContextId;
 
     // Hostname + scheme via CDP (Tab.url is unreliable without host perms).
-    const loc = await evalInPage(target, contextId, "({h:location.hostname,p:location.protocol})", false);
+    const loc = await evalInPage(target, contextId, "({h:location.hostname,p:location.protocol,path:location.pathname})", false);
     if (loc && /^(chrome|chrome-extension|devtools|about|view-source):/i.test(loc.p || "")) { flash("n/a", "#b00000"); return; }
 
     // Promote lazy content, un-clip scroll containers, wait, settle (also scrolls to top).
@@ -602,13 +731,42 @@ async function captureActiveTab(tabArg) {
     try { await chrome.debugger.detach(target); } catch (_) {}
     attached = false;
 
+    // Smart name: site + page path + local date + HHMM. Chrome auto-dedupes same-minute repeats
+    // with " (2)". e.g. swissnex-org-sanfrancisco-2026-09-23-1435.png
     const host = slug(loc && loc.h);
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    await chrome.downloads.download({
-      url: "data:image/png;base64," + data,
-      filename: `fullpage-${host}-${stamp}.png`,
-      saveAs: false
-    });
+    const pathPart = slugPath(loc && loc.path);
+    const { date, time } = stampNow();
+    const base = safeComponent([host, pathPart, date, time].filter(Boolean).join("-"), 100) || ("page-" + date + "-" + time);
+    const sub = (saveLocation === "subfolder") ? sanitizeSubfolder(saveSubfolder) : "";
+    const filename = (sub ? sub + "/" : "") + `${base}.png`;
+
+    let downloadId;
+    try {
+      downloadId = await chrome.downloads.download({ url: "data:image/png;base64," + data, filename, saveAs });
+    } catch (e) {
+      // A canceled Save As dialog is a user choice, not an error — bail quietly.
+      if (/cancel/i.test(String(e && e.message))) { console.log("[FullPageShot] save canceled"); return; }
+      throw e;
+    }
+    if (downloadId == null) { console.warn("[FullPageShot] download did not start (canceled?)"); return; }
+
+    // When we need the final path (copy) or the Save As dialog is in play, wait for the download to
+    // actually complete before badging/copying. A prompt can appear even in non-Ask modes if the
+    // user has Chrome's global "Ask where to save each file" on, so give a generous (bounded)
+    // window whenever we wait. "" => interrupted / canceled / timed out: don't claim success.
+    let finalPath = "";
+    if (copyPath || saveAs) {
+      finalPath = await getDownloadFilename(downloadId, 240000);
+      if (!finalPath) { console.log("[FullPageShot] download canceled or not completed"); return; }
+    }
+
+    // Optional: copy the saved file's absolute path (best-effort; already saved either way).
+    // Fully awaited (no detached race), so a newer capture can't interleave and overwrite it.
+    if (copyPath && finalPath) {
+      try { await copyTextToClipboard(finalPath); }
+      catch (e) { console.warn("[FullPageShot] copy path failed:", e); }
+    }
+
     const partial = diag && (diag.timedOut || diag.failed > 0 || diag.fontTimeout);
     flash(downscaled || partial ? "⚠" : "✓", downscaled || partial ? "#b8860b" : "#0a8a0a");
   } catch (err) {
@@ -625,8 +783,9 @@ async function captureActiveTab(tabArg) {
   }
 }
 
-// Hotkey and toolbar button both call the same function.
+// Hotkey and toolbar button both call the same function. (The worker is kept alive during a long
+// Save As wait by getDownloadFilename's periodic downloads.search, not by returning this promise.)
 chrome.commands.onCommand.addListener((cmd) => {
-  if (cmd === "capture-full-page") captureActiveTab();
+  if (cmd === "capture-full-page") return captureActiveTab();
 });
 chrome.action.onClicked.addListener((tab) => captureActiveTab(tab));

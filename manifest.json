@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "FullPageShot",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "minimum_chrome_version": "118",
   "description": "Open source, self-hosted, no tracking. Full-page screenshot of the current tab's entire scrolling height, in one click.",
   "homepage_url": "https://reimagined.agency",
-  "permissions": ["debugger", "downloads", "storage"],
+  "permissions": ["debugger", "downloads", "storage", "offscreen", "clipboardWrite"],
   "background": { "service_worker": "background.js" },
   "options_ui": { "page": "options.html", "open_in_tab": false },
   "icons": {

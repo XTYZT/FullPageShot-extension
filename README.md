@@ -29,8 +29,10 @@ keeping the trust boundary at ~two files you can read end-to-end.
    `chrome://extensions/shortcuts`.
 4. Optional: pin the toolbar icon — clicking it does the same as the hotkey.
 
-Capture any page → the PNG lands in your Downloads folder
-(`fullpage-<host>-<timestamp>.png`). A badge flashes `…` while working, then `✓`
+Capture any page → the PNG lands in your Downloads folder with a name built from the
+site, page, date, and time (e.g. `swissnex.org-sanfrancisco-2026-09-23-1435.png`;
+Chrome adds ` (2)` for same-minute repeats). You can change where captures are saved
+in [Settings](#settings). A badge flashes `…` while working, then `✓`
 (`⚠` if the page was downscaled or something timed out, `busy` if a capture is
 already running).
 
@@ -61,7 +63,20 @@ Open the settings from `chrome://extensions` (the extension's **Details** page, 
   laid out in the image. Good for archiving as much of a page's content as possible in one
   capture, even though it looks wider than the live page.
 
-The choice is stored with `chrome.storage.sync` (local to your Chrome profile; never sent
+**Save location:**
+
+- **Downloads folder (default)** — save straight to Downloads with an automatic name.
+- **Downloads subfolder** — always save into a subfolder of Downloads (for example,
+  `Screenshots` → `Downloads/Screenshots`), no prompt. The path is relative to Downloads and
+  cannot point outside it.
+- **Ask every time** — show the Save As dialog on each capture so you choose the folder and name.
+
+**After capture:**
+
+- **Copy file path to clipboard** — after saving, put the screenshot's full file path on the
+  clipboard, so you can paste it into a terminal, an editor, or a coding agent. Off by default.
+
+All settings are stored with `chrome.storage.sync` (local to your Chrome profile; never sent
 anywhere).
 
 ## How it works
@@ -101,12 +116,15 @@ to the page):
   screenshot uploads. (Preparing a capture can load images and other resources the
   page itself requests.) Keep this folder somewhere only you can write.
 - `downloads` — to save the PNG.
-- `storage` — to remember your capture mode (see [Settings](#settings)). Local to your
-  Chrome profile; nothing is sent anywhere. This permission shows no install warning.
+- `storage` — to remember your settings (see [Settings](#settings)). Local to your Chrome
+  profile; nothing is sent anywhere.
+- `offscreen` + `clipboardWrite` — only used, and only when you enable **Copy file path to
+  clipboard**, to write the saved file's path to the clipboard from a hidden document (a
+  service worker has no clipboard of its own).
 
-Still **no host permissions, no network, no remote code**. The `chrome.debugger` API shows
-a brief "started debugging this browser" banner during each capture; it auto-dismisses on
-detach.
+All three (`storage`, `offscreen`, `clipboardWrite`) show no install warning. Still **no host
+permissions, no network, no remote code**. The `chrome.debugger` API shows a brief "started
+debugging this browser" banner during each capture; it auto-dismisses on detach.
 
 ## Known limitations
 
@@ -126,9 +144,11 @@ and horizontal carousels are handled as of v2.
 
 ## Status
 
-**v2.3.0** (current). Adds a **Settings** page with a **capture mode** (Faithful by default,
-or Everything), so horizontal carousels stay on their live slide unless you opt in to fanning
-them out. v2.2.1 hardened capture cancellation and page-restore. v2.1 added scroll-container
+**v2.4.0** (current). Expands the **Settings** page: a **save location** (Downloads, a
+Downloads subfolder, or Ask every time), an optional **copy file path to clipboard**, and
+smarter automatic file names (site + page + date + time). v2.3.0 added the **capture mode**
+(Faithful by default, or Everything), so horizontal carousels stay on their live slide unless
+you opt in to fanning them out. v2.2.1 hardened capture cancellation and page-restore. v2.1 added scroll-container
 un-clipping that fixes "viewport-only" captures on body-scroll / inner-scroll pages, plus a
 settle step, with overlay-hiding narrowed to `position:fixed`. Verified on public websites and
 authenticated web apps.

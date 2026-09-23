@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>FullPageShot clipboard</title></head>
+<body>
+  <!-- Off-screen, never shown. Sole job: copy text to the clipboard on request from the
+       service worker (which has no DOM/clipboard of its own). Uses a textarea + execCommand,
+       the focus-free clipboard pattern that works from an offscreen document. -->
+  <textarea id="sink" aria-hidden="true"></textarea>
+  <script src="offscreen.js"></script>
+</body>
+</html>
