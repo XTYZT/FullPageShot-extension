@@ -104,6 +104,8 @@ async function inPageMain(opts) {
   try { if (globalThis.__fps && globalThis.__fps.cleanup) globalThis.__fps.cleanup(); } catch (_) {}
 
   const log = [];                       // CAS restore records
+  const scrollRecords = [];             // inner-scroller positions to restore on cleanup
+  let cleaned = false;                  // cleanup is one-shot (prevents double-restore)
   const ac = new AbortController();
   const signal = ac.signal;
   const pending = new Set();
@@ -127,7 +129,8 @@ async function inPageMain(opts) {
       prevPriority: el.style.getPropertyPriority(key)
     };
     el.style.setProperty(key, val, prio || "");
-    rec.injected = el.style.getPropertyValue(key); // serialized form the browser stored
+    rec.injected = el.style.getPropertyValue(key);           // serialized value the browser stored
+    rec.injectedPriority = el.style.getPropertyPriority(key); // and the priority it stored
     log.push(rec);
   }
 
@@ -218,12 +221,20 @@ async function inPageMain(opts) {
     try {
       const vh = window.innerHeight, vw = window.innerWidth;
       if (!vh || !vw) return;
+      // "everything" releases page-level scrollers on EITHER axis (horizontal carousels fan out
+      // to show every slide). "faithful" (default) releases only genuinely VERTICAL page scrollers
+      // so a full-page shot expands body-scroll / inner-scroll app shells downward, while horizontal
+      // carousels stay clipped and keep the slide they were showing on screen.
+      const everything = !!(opts && opts.captureMode === "everything");
       const cands = [];
       if (document.scrollingElement) cands.push(document.scrollingElement);
       if (document.documentElement) cands.push(document.documentElement);
       if (document.body) cands.push(document.body);
       document.querySelectorAll("body *").forEach((el) => cands.push(el));
       const seen = new Set();
+      const targets = [];
+      // Pass 1: select eligible page-level scrollers and record their scroll offsets BEFORE any
+      // mutation (un-clipping one scroller can reset another's offset).
       for (const el of cands) {
         if (!el || el.nodeType !== 1 || seen.has(el)) continue;
         seen.add(el);
@@ -231,11 +242,22 @@ async function inPageMain(opts) {
           const s = getComputedStyle(el);
           const clips = /(auto|scroll|hidden|clip)/.test(s.overflowY) || /(auto|scroll|hidden|clip)/.test(s.overflowX) || /(auto|scroll|hidden|clip)/.test(s.overflow);
           if (!clips) continue;
-          if (el.scrollHeight <= el.clientHeight + 40 && el.scrollWidth <= el.clientWidth + 40) continue; // no real overflow
+          const vOver = el.scrollHeight > el.clientHeight + 40; // clipped content below the fold
+          const hOver = el.scrollWidth  > el.clientWidth  + 40; // horizontal scroller (carousel/slider)
+          // faithful: vertical overflow only, and NOT a horizontal scroller (leave carousels alone).
+          // everything: any real overflow on either axis.
+          if (everything ? (!vOver && !hOver) : (!vOver || hOver)) continue;
           const isDoc = (el === document.documentElement || el === document.body || el === document.scrollingElement);
           const r = el.getBoundingClientRect();
           const pageLevel = isDoc || (r.width >= vw * 0.6 && el.clientHeight >= vh * 0.5);
           if (!pageLevel) continue;
+          scrollRecords.push({ el, left: el.scrollLeft, top: el.scrollTop });
+          targets.push(el);
+        } catch (_) {}
+      }
+      // Pass 2: un-clip the selected scrollers.
+      for (const el of targets) {
+        try {
           setStyleProp(el, "overflow", "visible", "important");
           setStyleProp(el, "overflow-x", "visible", "important");
           setStyleProp(el, "overflow-y", "visible", "important");
@@ -286,9 +308,11 @@ async function inPageMain(opts) {
   }
 
   function cleanup() {
+    if (cleaned) return;            // one-shot: never re-run (prevents a double / post-restore mutation)
+    cleaned = true;
     if (watchdog) { clearTimeout(watchdog); watchdog = null; }
     try { if (observer) observer.disconnect(); } catch (_) {}
-    try { ac.abort(); } catch (_) {}
+    try { ac.abort(); } catch (_) {}   // signals the pipeline to stop at its next await/guard
     try { if (revealStyle && revealStyle.parentNode) revealStyle.parentNode.removeChild(revealStyle); } catch (_) {}
     for (let i = log.length - 1; i >= 0; i--) {
       const r = log[i];
@@ -298,7 +322,9 @@ async function inPageMain(opts) {
             if (r.had) r.el.setAttribute(r.key, r.prev); else r.el.removeAttribute(r.key);
           }
         } else {
-          if (r.el.style.getPropertyValue(r.key) === r.injected) {
+          // restore only if BOTH the value AND the priority we injected are still in place
+          if (r.el.style.getPropertyValue(r.key) === r.injected &&
+              r.el.style.getPropertyPriority(r.key) === r.injectedPriority) {
             if (r.prev) r.el.style.setProperty(r.key, r.prev, r.prevPriority);
             else r.el.style.removeProperty(r.key);
             if (!r.hadStyleAttr && r.el.getAttribute("style") === "") r.el.removeAttribute("style");
@@ -307,11 +333,15 @@ async function inPageMain(opts) {
       } catch (_) {}
     }
     log.length = 0;
-    // Restore the viewer's scroll position (both window and the scrolling element, since
-    // un-clipping a body/inner-scroll layout resets the effective scroller).
+    // Restore scroll positions: inner scrollers first (now re-clipped), then window/document.
+    for (let i = scrollRecords.length - 1; i >= 0; i--) {
+      const s = scrollRecords[i];
+      try { if (s.el && s.el.isConnected) { s.el.scrollLeft = s.left; s.el.scrollTop = s.top; } } catch (_) {}
+    }
+    scrollRecords.length = 0;
     try { window.scrollTo(savedX, savedY); } catch (_) {}
     try { const se = document.scrollingElement || document.documentElement; if (se) se.scrollTop = savedScrollTop; } catch (_) {}
-    try { delete globalThis.__fps; } catch (_) { globalThis.__fps = undefined; }
+    try { if (globalThis.__fps && globalThis.__fps.cleanup === cleanup) delete globalThis.__fps; } catch (_) { globalThis.__fps = undefined; }
   }
 
   // Arm watchdog BEFORE any mutation, publish controller.
@@ -321,6 +351,7 @@ async function inPageMain(opts) {
   // Observe late-inserted / late-attributed lazy content.
   try {
     observer = new MutationObserver((muts) => {
+      if (signal.aborted) return;
       for (const m of muts) {
         if (m.type === "childList") {
           m.addedNodes.forEach((n) => {
@@ -360,36 +391,40 @@ async function inPageMain(opts) {
     const step = Math.max(200, Math.floor(vh * 0.9));
     const ps0 = Date.now();
     let y = 0;
-    while (y < docH() - vh && (Date.now() - ps0) < PRESCROLL_MS) {
+    while (y < docH() - vh && (Date.now() - ps0) < PRESCROLL_MS && !signal.aborted) {
       window.scrollTo(0, y);
       await new Promise((r) => setTimeout(r, 60));
       y += step;
     }
   } catch (_) {}
+  if (signal.aborted) { diag.aborted = true; return diag; }
 
   // Wait for images within the shared deadline.
-  while (pending.size > 0 && remaining() > 0) {
+  while (pending.size > 0 && remaining() > 0 && !signal.aborted) {
     await new Promise((r) => setTimeout(r, 100));
   }
+  if (signal.aborted) { diag.aborted = true; return diag; }
   if (pending.size > 0) diag.timedOut = true;
 
   // Settle: wait for the document height to stop growing (deferred/async content, e.g. late
   // section hydration in SPAs). Re-promote on growth. Bounded by the shared deadline.
   try {
     let last = docH(), stableFor = 0;
-    while (remaining() > 0 && stableFor < SETTLE_QUIET) {
+    while (remaining() > 0 && stableFor < SETTLE_QUIET && !signal.aborted) {
       await new Promise((r) => setTimeout(r, 150));
+      if (signal.aborted) break;   // cleanup ran during the await: don't re-promote/mutate after a restore
       const now = docH();
       if (now > last + 1) { last = now; stableFor = 0; promoteAll(document); }
       else stableFor += 150;
     }
     // absorb any images promoted during settle
     const t1 = Date.now();
-    while (pending.size > 0 && remaining() > 0 && (Date.now() - t1) < 2000) {
+    while (pending.size > 0 && remaining() > 0 && (Date.now() - t1) < 2000 && !signal.aborted) {
       await new Promise((r) => setTimeout(r, 100));
     }
     diag.settledH = last;
   } catch (_) {}
+  if (signal.aborted) { diag.aborted = true; return diag; }
 
   // Fonts (bounded).
   try {
@@ -399,6 +434,7 @@ async function inPageMain(opts) {
       new Promise((r) => setTimeout(() => { diag.fontTimeout = true; r(); }, remaining()))
     ]);
   } catch (_) {}
+  if (signal.aborted) { diag.aborted = true; return diag; }
 
   // Best-effort decode of everything currently in the DOM (bounded by the deadline).
   try {
@@ -406,12 +442,25 @@ async function inPageMain(opts) {
     await Promise.race([decodeAll, new Promise((r) => setTimeout(r, Math.min(remaining(), 3000)))]);
   } catch (_) {}
 
-  // Reveal scroll-triggered animations (WAAPI 0->1) created during promotion/pre-scroll.
+  if (signal.aborted) { diag.aborted = true; return diag; }
+
+  // Reveal scroll-triggered animations (WAAPI opacity 0->1) created during promotion/pre-scroll.
+  // A stylesheet override can't beat a *running* Web Animation, so finish() them; the injected
+  // img{opacity:1!important} style then wins for any that had no animation. Skipped if aborted
+  // (cleanup would otherwise fight in-flight mutations).
   finishAnims();
 
-  // Scroll to top (instant) and let two frames settle.
+  // Scroll to top (instant) and let two frames settle. Bounded so a background/dead tab (where
+  // rAF never fires) can't hang the pipeline, and abort-aware so cleanup can proceed.
   try { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); } catch (_) { window.scrollTo(0, 0); }
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; resolve(); };
+    try { signal.addEventListener("abort", finish, { once: true }); } catch (_) {}
+    const t = setTimeout(finish, 1000);
+    requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); finish(); }));
+  });
+  if (signal.aborted) { diag.aborted = true; return diag; }
 
   // Hide overlays parked off-screen (search popins, drawers) so they aren't painted mid-canvas.
   hideOffscreenFixed();
@@ -426,7 +475,10 @@ function inPageMainSource(opts) {
   return "(" + inPageMain.toString() + ")(" + JSON.stringify(opts) + ")";
 }
 
-const CLEANUP_EXPR = "(globalThis.__fps && globalThis.__fps.cleanup && globalThis.__fps.cleanup()), 1";
+// Returns 1 only when an active preparation existed and was cleaned; 0 if none was live
+// (e.g. the watchdog already restored the page and removed __fps). The caller treats 0 as
+// "not acknowledged" so it never downloads a capture of an already-restored page.
+const CLEANUP_EXPR = "(function(){ if (globalThis.__fps && globalThis.__fps.cleanup) { globalThis.__fps.cleanup(); return 1; } return 0; })()";
 
 // ---------- privileged-page guard ----------
 function isRestrictedUrl(url) {
@@ -453,6 +505,18 @@ async function captureActiveTab(tabArg) {
     target.tabId = tab.id;
     detachedTabs.delete(tab.id);
 
+    // Read the user's capture mode (options page) BEFORE attaching, and bound it with a hard
+    // timeout so a slow/throttled storage read can never stall a capture with the debugger
+    // attached. Default faithful on timeout or error.
+    let captureMode = "faithful";
+    try {
+      const st = await Promise.race([
+        chrome.storage.sync.get({ captureMode: "faithful" }),
+        new Promise((r) => setTimeout(() => r(null), 400))
+      ]);
+      if (st && st.captureMode === "everything") captureMode = "everything";
+    } catch (_) {}
+
     try {
       await chrome.debugger.attach(target, PROTO);
       attached = true;
@@ -478,10 +542,14 @@ async function captureActiveTab(tabArg) {
 
     // Promote lazy content, un-clip scroll containers, wait, settle (also scrolls to top).
     const diag = await evalInPage(target, contextId, inPageMainSource({
-      deadlineMs: 15000, prescrollMs: 3000, maxPromotions: 2000, watchdogMs: 45000, settleQuietMs: 450
+      deadlineMs: 15000, prescrollMs: 3000, maxPromotions: 2000, watchdogMs: 45000, settleQuietMs: 450,
+      captureMode
     }), true);
     if (detachedTabs.has(tab.id)) { console.warn("[FullPageShot] detached during wait"); return; }
     console.log("[FullPageShot] diagnostics:", diag);
+    // Preparation aborted (watchdog fired and already restored the page) — don't capture a
+    // half-restored/un-prepared page. The `finally` still runs a best-effort cleanup + detach.
+    if (diag && diag.aborted) { flash("err", "#b00000"); console.warn("[FullPageShot] preparation aborted; not capturing"); return; }
 
     // Measure.
     const metrics = await chrome.debugger.sendCommand(target, "Page.getLayoutMetrics");
@@ -525,8 +593,11 @@ async function captureActiveTab(tabArg) {
       }
     }
 
-    // Restore the page, then detach, THEN download.
-    try { await evalInPage(target, contextId, CLEANUP_EXPR, false); } catch (e) { console.warn("[FullPageShot] cleanup eval failed:", e); }
+    // Restore the page, then detach, THEN download. Only mark restored on a confirmed ack; if
+    // cleanup fails, let it propagate so the `finally` retries cleanup before detaching (and we
+    // don't download a capture whose page couldn't be restored).
+    const ack = await evalInPage(target, contextId, CLEANUP_EXPR, false);
+    if (ack !== 1) throw new Error("cleanup did not acknowledge");
     restored = true;
     try { await chrome.debugger.detach(target); } catch (_) {}
     attached = false;

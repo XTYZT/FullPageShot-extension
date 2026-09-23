@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FullPageShot Settings</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --accent: #6C3ED5;
+      --accent-deep: #5326BC;
+      --accent-light: #A07CF1;
+      --grad: linear-gradient(135deg, #A07CF1, #5326BC);
+      --bg: #f6f6f9;
+      --surface: #ffffff;
+      --surface-2: #faf9fe;
+      --text: #202124;
+      --text-2: #5f6368;
+      --border: #dadce0;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+      --ring: rgba(108,62,213,.35);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #202124;
+        --surface: #292a2d;
+        --surface-2: #2d2833;
+        --text: #e8eaed;
+        --text-2: #9aa0a6;
+        --border: #3c4043;
+        --shadow: 0 1px 3px rgba(0,0,0,.4);
+        --ring: rgba(160,124,241,.45);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    header img {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      flex: 0 0 auto;
+    }
+    header .titles { min-width: 0; }
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+    header p {
+      margin: 2px 0 0;
+      color: var(--text-2);
+      font-size: 13px;
+    }
+    section { margin-bottom: 28px; }
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-2);
+      margin: 0 0 10px 2px;
+    }
+    fieldset {
+      border: 0;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .opt {
+      display: flex;
+      gap: 13px;
+      padding: 15px 16px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+      transition: border-color .15s ease, background .15s ease;
+    }
+    .opt:hover { border-color: var(--accent-light); }
+    .opt:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+    .opt:has(input:checked) {
+      border-color: var(--accent);
+      background: var(--surface-2);
+    }
+    .opt input {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      margin: 1px 0 0;
+      border: 2px solid var(--border);
+      border-radius: 50%;
+      flex: 0 0 auto;
+      cursor: pointer;
+      position: relative;
+      transition: border-color .15s ease;
+    }
+    .opt input:checked { border-color: var(--accent); }
+    .opt input:checked::after {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      border-radius: 50%;
+      background: var(--grad);
+    }
+    .opt .body { min-width: 0; }
+    .opt .name {
+      font-weight: 600;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .badge-default {
+      font-size: 10.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border-radius: 5px;
+      padding: 1px 6px;
+    }
+    .opt .desc {
+      margin: 4px 0 0;
+      color: var(--text-2);
+      font-size: 13px;
+      text-wrap: pretty;
+    }
+    .saved {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--accent);
+      opacity: 0;
+      transition: opacity .2s ease;
+    }
+    .saved.show { opacity: 1; }
+    .saved svg { width: 15px; height: 15px; }
+    footer {
+      margin-top: 34px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      color: var(--text-2);
+      font-size: 12.5px;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="icons/icon-128.png" alt="FullPageShot">
+      <div class="titles">
+        <h1>FullPageShot</h1>
+        <p>Full-page screenshots of your current tab</p>
+      </div>
+    </header>
+
+    <section>
+      <p class="section-label">Capture mode</p>
+      <fieldset>
+        <legend>Capture mode</legend>
+
+        <label class="opt">
+          <input type="radio" name="captureMode" value="faithful">
+          <span class="body">
+            <span class="name">Faithful <span class="badge-default">Default</span></span>
+            <span class="desc">Capture the page the way it looks. Carousels and sliders stay on the slide that is showing, so the image matches what you see on screen.</span>
+          </span>
+        </label>
+
+        <label class="opt">
+          <input type="radio" name="captureMode" value="everything">
+          <span class="body">
+            <span class="name">Everything</span>
+            <span class="desc">Expand large carousels and sliders so more of their off-screen items are laid out in the image. Good for archiving as much of a page's content as possible in one capture, even though it looks wider than the live page.</span>
+          </span>
+        </label>
+      </fieldset>
+      <div style="margin-top:12px; height:18px;">
+        <span class="saved" id="saved">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Saved
+        </span>
+      </div>
+    </section>
+
+    <footer>
+      <span>Made by <a href="https://reimagined.agency" target="_blank" rel="noopener">re:imagined</a></span>
+      <span id="version"></span>
+    </footer>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

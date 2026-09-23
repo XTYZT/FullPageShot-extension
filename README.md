@@ -1,9 +1,13 @@
+<p align="center">
+  <img src="icons/icon-128.png" alt="FullPageShot" width="96" height="96">
+</p>
+
 # FullPageShot
 
 One-keypress **full-page screenshots of your current Chrome tab** — a self-hosted
 Manifest V3 extension built on the Chrome DevTools Protocol (`chrome.debugger`).
 No third-party extension code, no analytics, no remote executable code, no screenshot
-uploads: the whole program is two files you can read end-to-end.
+uploads: the whole program is a handful of files you can read end-to-end.
 
 Captures the **live tab** you're looking at — logged-in session, current DOM,
 dynamic content — as a single full-height PNG, triggered by a keyboard shortcut
@@ -30,6 +34,36 @@ Capture any page → the PNG lands in your Downloads folder
 (`⚠` if the page was downscaled or something timed out, `busy` if a capture is
 already running).
 
+## Keyboard shortcut
+
+Default: **`Ctrl+Shift+Y`** (Windows / Linux) or **`⌘⇧Y` / `Command+Shift+Y`** (macOS).
+
+FullPageShot *suggests* this shortcut, but Chrome only auto-assigns a suggested shortcut
+when the combination is free, so it may start out unset. To set or change it:
+
+1. Open `chrome://extensions/shortcuts`.
+2. Find **FullPageShot**, the row **"Capture the full page"**.
+3. Click the field and press your combination (`⌘⇧Y` on macOS, `Ctrl+Shift+Y` on
+   Windows/Linux, or any combo you prefer).
+
+The toolbar button does the same thing, so the extension works even with no shortcut set.
+
+## Settings
+
+Open the settings from `chrome://extensions` (the extension's **Details** page, then
+**Extension options**) or by right-clicking the toolbar icon and choosing **Options**.
+
+**Capture mode:**
+
+- **Faithful (default)** — captures the page the way it looks. Carousels and sliders stay
+  on the slide that is showing, so the image matches what you see on screen.
+- **Everything** — expands large carousels and sliders so more of their off-screen items are
+  laid out in the image. Good for archiving as much of a page's content as possible in one
+  capture, even though it looks wider than the live page.
+
+The choice is stored with `chrome.storage.sync` (local to your Chrome profile; never sent
+anywhere).
+
 ## How it works
 
 Over a short-lived `chrome.debugger` (CDP) session on the active tab, in an
@@ -42,6 +76,9 @@ to the page):
 2. **Un-clip page-level scroll containers** — release body-scroll and inner-scroll
    layouts (an `html`/`body` or full-height app-shell `<div>` with its own scrollbar)
    so their content flows into the document and the true full height can be captured.
+   In **Faithful** mode (default) only genuinely vertical scrollers are released, so
+   horizontal carousels stay on their current slide; **Everything** mode also releases
+   horizontal scrollers so their slides fan out (see [Settings](#settings)).
 3. **Settle** — wait until the page height stops growing, so async/late-loading
    sections are included.
 4. **Reveal scroll-triggered content** — inject a removable `img{opacity:1!important}`
@@ -64,9 +101,12 @@ to the page):
   screenshot uploads. (Preparing a capture can load images and other resources the
   page itself requests.) Keep this folder somewhere only you can write.
 - `downloads` — to save the PNG.
+- `storage` — to remember your capture mode (see [Settings](#settings)). Local to your
+  Chrome profile; nothing is sent anywhere. This permission shows no install warning.
 
-The `chrome.debugger` API shows a brief "started debugging this browser" banner
-during each capture; it auto-dismisses on detach.
+Still **no host permissions, no network, no remote code**. The `chrome.debugger` API shows
+a brief "started debugging this browser" banner during each capture; it auto-dismisses on
+detach.
 
 ## Known limitations
 
@@ -86,10 +126,12 @@ and horizontal carousels are handled as of v2.
 
 ## Status
 
-**v2.2.0** (current). Adds a brand icon set (a badge for the store/install, a monoline
-for the toolbar). v2.1 added scroll-container un-clipping that fixes "viewport-only"
-captures on body-scroll / inner-scroll pages, plus a settle step, with overlay-hiding
-narrowed to `position:fixed`. Verified on public websites and authenticated web apps.
+**v2.3.0** (current). Adds a **Settings** page with a **capture mode** (Faithful by default,
+or Everything), so horizontal carousels stay on their live slide unless you opt in to fanning
+them out. v2.2.1 hardened capture cancellation and page-restore. v2.1 added scroll-container
+un-clipping that fixes "viewport-only" captures on body-scroll / inner-scroll pages, plus a
+settle step, with overlay-hiding narrowed to `position:fixed`. Verified on public websites and
+authenticated web apps.
 
 ## License
 
