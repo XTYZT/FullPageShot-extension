@@ -48,6 +48,11 @@ when the combination is free, so it may start out unset. To set or change it:
 3. Click the field and press your combination (`⌘⇧Y` on macOS, `Ctrl+Shift+Y` on
    Windows/Linux, or any combo you prefer).
 
+If the shortcut doesn't work, another extension most likely already uses that combination,
+so Chrome left FullPageShot's unset. On a fresh install FullPageShot detects this and opens its
+Settings, which show the current shortcut (or **Not set**) and a button that takes you straight
+to `chrome://extensions/shortcuts`.
+
 The toolbar button does the same thing, so the extension works even with no shortcut set.
 
 ## Settings

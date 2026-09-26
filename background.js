@@ -789,3 +789,17 @@ chrome.commands.onCommand.addListener((cmd) => {
   if (cmd === "capture-full-page") return captureActiveTab();
 });
 chrome.action.onClicked.addListener((tab) => captureActiveTab(tab));
+
+// Chrome applies the manifest's suggested_key only if the combo is free at install time; when
+// another extension already owns it, the command is silently left unbound (shortcut === "").
+// On a fresh install, detect that and open Settings, which shows the status and a fix button.
+chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  if (reason !== "install") return;
+  try {
+    const cmds = await chrome.commands.getAll();
+    const cmd = cmds.find((c) => c.name === "capture-full-page");
+    if (cmd && !cmd.shortcut) chrome.runtime.openOptionsPage();
+  } catch (err) {
+    console.error("[FullPageShot] shortcut check failed:", err);
+  }
+});

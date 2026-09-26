@@ -80,6 +80,57 @@ function fillVersion() {
   catch (_) { el.textContent = ""; }
 }
 
+// Keyboard shortcut status. Chrome only applies the manifest's suggested key when it is free at
+// install time (another extension may already own it), so show the live binding and offer a fix.
+// Outside the extension, `?shortcut=` (empty = unset) drives the card for previews.
+function renderShortcut(shortcut) {
+  const card = document.getElementById("shortcutCard");
+  const name = document.getElementById("shortcutName");
+  const desc = document.getElementById("shortcutDesc");
+  const btn = document.getElementById("shortcutBtn");
+  if (!card || !name || !desc || !btn) return;
+  name.textContent = "";
+  if (shortcut) {
+    card.classList.remove("unset");
+    name.append("Capture shortcut ");
+    const k = document.createElement("kbd");
+    k.textContent = shortcut;
+    name.append(k);
+    desc.textContent = "Press it on any page to capture it. The toolbar button does the same.";
+    btn.textContent = "Change shortcut";
+  } else {
+    card.classList.add("unset");
+    name.append("No shortcut set ");
+    const b = document.createElement("span");
+    b.className = "badge-warn";
+    b.textContent = "Not set";
+    name.append(b);
+    desc.textContent = "Chrome could not assign the suggested shortcut, usually because another extension already uses it. Choose a key combination to capture with the keyboard. The toolbar button works either way.";
+    btn.textContent = "Set shortcut";
+  }
+}
+
+function loadShortcut() {
+  let cmds = null;
+  try { cmds = chrome.commands; } catch (_) {}
+  if (!cmds) {
+    const q = new URLSearchParams(location.search);
+    renderShortcut(q.has("shortcut") ? q.get("shortcut") : "\u2318\u21e7Y");
+    return;
+  }
+  try {
+    cmds.getAll((list) => {
+      const c = (list || []).find((x) => x.name === "capture-full-page");
+      renderShortcut(c ? c.shortcut : "");
+    });
+  } catch (_) {}
+}
+
+function openShortcutSettings() {
+  // chrome:// URLs can't be opened from a plain link; tabs.create needs no permission.
+  try { chrome.tabs.create({ url: "chrome://extensions/shortcuts" }); } catch (_) {}
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   for (const r of radios("captureMode")) {
     r.addEventListener("change", () => { if (r.checked) { touched.add("captureMode"); save({ captureMode: r.value }); } });
@@ -121,6 +172,13 @@ document.addEventListener("DOMContentLoaded", () => {
     box.addEventListener("change", () => { touched.add("copyPath"); save({ copyPath: box.checked }); });
   }
 
+  const scBtn = document.getElementById("shortcutBtn");
+  if (scBtn) scBtn.addEventListener("click", openShortcutSettings);
+  // Re-read when the user comes back from chrome://extensions/shortcuts.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) loadShortcut(); });
+  window.addEventListener("focus", loadShortcut);
+
   load();
+  loadShortcut();
   fillVersion();
 });

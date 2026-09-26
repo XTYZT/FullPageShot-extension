@@ -19,6 +19,8 @@
       --border: #dadce0;
       --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
       --ring: rgba(108,62,213,.35);
+      --warn: #b3261e;
+      --warn-bg: #fdf3f2;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -30,6 +32,8 @@
         --border: #3c4043;
         --shadow: 0 1px 3px rgba(0,0,0,.4);
         --ring: rgba(160,124,241,.45);
+        --warn: #f2b8b5;
+        --warn-bg: #3a2a2a;
       }
     }
     * { box-sizing: border-box; }
@@ -194,6 +198,56 @@
     }
     .saved.show { opacity: 1; }
     .saved svg { width: 15px; height: 15px; }
+    /* Keyboard shortcut status card */
+    .shortcut {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      padding: 15px 16px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+    .shortcut.unset { border-color: var(--warn); background: var(--warn-bg); }
+    .shortcut .body { min-width: 0; flex: 1 1 260px; }
+    .shortcut .name { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .shortcut .desc { margin: 4px 0 0; color: var(--text-2); font-size: 13px; text-wrap: pretty; }
+    kbd {
+      font: 600 13px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-bottom-width: 2px;
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--text);
+    }
+    .badge-warn {
+      font-size: 10.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--warn);
+      background: color-mix(in srgb, var(--warn) 14%, transparent);
+      border-radius: 5px;
+      padding: 1px 6px;
+    }
+    .btn {
+      flex: 0 0 auto;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      background: var(--grad);
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
     footer {
       margin-top: 34px;
       padding-top: 18px;
@@ -219,6 +273,17 @@
         <p>Full-page screenshots of your current tab</p>
       </div>
     </header>
+
+    <section>
+      <p class="section-label">Keyboard shortcut</p>
+      <div class="shortcut" id="shortcutCard">
+        <span class="body">
+          <span class="name" id="shortcutName">Capture shortcut <kbd id="shortcutKey">…</kbd></span>
+          <span class="desc" id="shortcutDesc">Press it on any page to capture it. The toolbar button does the same.</span>
+        </span>
+        <button type="button" class="btn" id="shortcutBtn">Change shortcut</button>
+      </div>
+    </section>
 
     <section>
       <p class="section-label">Capture mode</p>
