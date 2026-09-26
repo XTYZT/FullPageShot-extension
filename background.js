@@ -132,7 +132,7 @@ async function inPageMain(opts) {
   let observer = null;
   let watchdog = null;
   let revealStyle = null;
-  const diag = { promoted: 0, loaded: 0, failed: 0, timedOut: false, fontTimeout: false, revealed: 0, unclipped: 0, hiddenOverlays: 0, settledH: 0, w: 0, h: 0, dpr: 1 };
+  const diag = { promoted: 0, loaded: 0, failed: 0, timedOut: false, fontTimeout: false, revealed: 0, unclipped: 0, hiddenOverlays: 0, movedBars: 0, settledH: 0, w: 0, h: 0, dpr: 1 };
 
   const savedX = window.scrollX, savedY = window.scrollY;
   const savedScrollTop = (document.scrollingElement || document.documentElement || {}).scrollTop || 0;
@@ -246,46 +246,78 @@ async function inPageMain(opts) {
       // so a full-page shot expands body-scroll / inner-scroll app shells downward, while horizontal
       // carousels stay clipped and keep the slide they were showing on screen.
       const everything = !!(opts && opts.captureMode === "everything");
-      const cands = [];
+      const released = new Set();
+      const tStart = Date.now();
+      // Round 1 scans the whole page. Freeing a scroller can make an ANCESTOR overflow for the
+      // first time (e.g. Play Console: #main-content inside an absolutely-positioned,
+      // overflow-clipping .console-content), so later rounds re-check only the ancestors of what
+      // the previous round released, until nothing new is released (bounded rounds + time).
+      let cands = [];
       if (document.scrollingElement) cands.push(document.scrollingElement);
       if (document.documentElement) cands.push(document.documentElement);
       if (document.body) cands.push(document.body);
       document.querySelectorAll("body *").forEach((el) => cands.push(el));
-      const seen = new Set();
-      const targets = [];
-      // Pass 1: select eligible page-level scrollers and record their scroll offsets BEFORE any
-      // mutation (un-clipping one scroller can reset another's offset).
-      for (const el of cands) {
-        if (!el || el.nodeType !== 1 || seen.has(el)) continue;
-        seen.add(el);
-        try {
-          const s = getComputedStyle(el);
-          const clips = /(auto|scroll|hidden|clip)/.test(s.overflowY) || /(auto|scroll|hidden|clip)/.test(s.overflowX) || /(auto|scroll|hidden|clip)/.test(s.overflow);
-          if (!clips) continue;
-          const vOver = el.scrollHeight > el.clientHeight + 40; // clipped content below the fold
-          const hOver = el.scrollWidth  > el.clientWidth  + 40; // horizontal scroller (carousel/slider)
-          // faithful: vertical overflow only, and NOT a horizontal scroller (leave carousels alone).
-          // everything: any real overflow on either axis.
-          if (everything ? (!vOver && !hOver) : (!vOver || hOver)) continue;
-          const isDoc = (el === document.documentElement || el === document.body || el === document.scrollingElement);
-          const r = el.getBoundingClientRect();
-          const pageLevel = isDoc || (r.width >= vw * 0.6 && el.clientHeight >= vh * 0.5);
-          if (!pageLevel) continue;
-          scrollRecords.push({ el, left: el.scrollLeft, top: el.scrollTop });
-          targets.push(el);
-        } catch (_) {}
-      }
-      // Pass 2: un-clip the selected scrollers.
-      for (const el of targets) {
-        try {
-          setStyleProp(el, "overflow", "visible", "important");
-          setStyleProp(el, "overflow-x", "visible", "important");
-          setStyleProp(el, "overflow-y", "visible", "important");
-          setStyleProp(el, "height", "auto", "important");
-          setStyleProp(el, "max-height", "none", "important");
-          setStyleProp(el, "min-height", "0", "important");
-          diag.unclipped++;
-        } catch (_) {}
+      for (let round = 0; round < 4 && cands.length && (round === 0 || Date.now() - tStart < 1500); round++) {
+        const seen = new Set();
+        const targets = [];
+        // Select eligible page-level scrollers and record their scroll offsets BEFORE this
+        // round's mutations (un-clipping one scroller can reset another's offset).
+        for (const el of cands) {
+          if (!el || el.nodeType !== 1 || seen.has(el) || released.has(el)) continue;
+          seen.add(el);
+          try {
+            const s = getComputedStyle(el);
+            const clips = /(auto|scroll|hidden|clip)/.test(s.overflowY) || /(auto|scroll|hidden|clip)/.test(s.overflowX) || /(auto|scroll|hidden|clip)/.test(s.overflow);
+            if (!clips) continue;
+            const vOver = el.scrollHeight > el.clientHeight + 40; // clipped content below the fold
+            const hOver = el.scrollWidth  > el.clientWidth  + 40; // horizontal scroller (carousel/slider)
+            // faithful: needs vertical overflow; horizontal overflow stays clipped (see keepX), so
+            // carousels keep their live slide. everything: any real overflow on either axis.
+            if (everything ? (!vOver && !hOver) : !vOver) continue;
+            const isDoc = (el === document.documentElement || el === document.body || el === document.scrollingElement);
+            const r = el.getBoundingClientRect();
+            const pageLevel = isDoc || (r.width >= vw * 0.6 && el.clientHeight >= vh * 0.5);
+            if (!pageLevel) continue;
+            // An absolutely-positioned box pinned by top AND bottom gets its height from those
+            // insets, so height:auto alone leaves it viewport-tall; it also needs bottom:auto.
+            const pinned = s.position === "absolute" && s.top !== "auto" && s.bottom !== "auto";
+            // faithful + horizontal overflow (an app-shell wrapper hiding an off-screen drawer, or
+            // a tall carousel): release it vertically only and keep it clipped horizontally.
+            const keepX = !everything && hOver;
+            // Clipping removes horizontal scrolling, which would snap a scrolled carousel back to
+            // its first slide; leave those alone so the capture shows the slide on screen.
+            if (keepX && Math.abs(el.scrollLeft) > 1) continue;
+            // `clip` (unlike hidden/auto) doesn't create a block formatting context, so floats
+            // could escape; keep one with flow-root for plain block boxes.
+            const needBfc = keepX && s.display === "block";
+            scrollRecords.push({ el, left: el.scrollLeft, top: el.scrollTop });
+            targets.push({ el, pinned, keepX, needBfc });
+          } catch (_) {}
+        }
+        if (!targets.length) break;
+        // Un-clip this round's scrollers.
+        for (const { el, pinned, keepX, needBfc } of targets) {
+          released.add(el);
+          try {
+            setStyleProp(el, "overflow", "visible", "important");
+            // overflow-x:clip (unlike hidden) doesn't force overflow-y from visible back to auto.
+            setStyleProp(el, "overflow-x", keepX ? "clip" : "visible", "important");
+            setStyleProp(el, "overflow-y", "visible", "important");
+            setStyleProp(el, "height", "auto", "important");
+            setStyleProp(el, "max-height", "none", "important");
+            setStyleProp(el, "min-height", "0", "important");
+            if (pinned) setStyleProp(el, "bottom", "auto", "important");
+            if (needBfc) setStyleProp(el, "display", "flow-root", "important");
+            diag.unclipped++;
+          } catch (_) {}
+        }
+        try { void document.documentElement.offsetHeight; } catch (_) {} // reflow before next round
+        // Next round: unreleased ancestors of this round's targets (nearest first, deduped).
+        const next = new Set();
+        for (const { el } of targets) {
+          for (let a = el.parentElement; a; a = a.parentElement) if (!released.has(a)) next.add(a);
+        }
+        cands = [...next];
       }
       try { void document.documentElement.offsetHeight; } catch (_) {} // force reflow
     } catch (_) {}
@@ -308,19 +340,48 @@ async function inPageMain(opts) {
   }
   // Hide fixed overlays that are entirely OFF-SCREEN at scrollTop 0 (parked popins, drawers,
   // off-canvas menus). captureBeyondViewport would otherwise paint them mid-canvas.
+  // Move BOTTOM-ANCHORED fixed bars (action bars, bottom banners) to the bottom of the full page,
+  // where the viewer sees them after scrolling to the end; captureBeyondViewport would otherwise
+  // paint them one viewport-height down, over the content (Play Console's Save/Next bar). Uses
+  // the independent `translate` property so the page's own `transform` is untouched.
   // ONLY position:fixed — sticky elements flow with content (a below-the-fold sticky heading is
-  // real content, not an overlay). Visible fixed headers / cookie bars / chat bubbles are left alone.
+  // real content, not an overlay). Other visible fixed elements (headers, side menus, corner
+  // chat bubbles) are left where they are on screen.
   function hideOffscreenFixed() {
     try {
       const vh = window.innerHeight;
+      const docH = Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0);
+      const moved = new Set();
+      // A fixed element is laid out against the viewport only if no ancestor creates a containing
+      // block for it (transform, filter, perspective, contain, ...); otherwise the viewport-based
+      // offset below would put it in the wrong place.
+      const viewportAnchored = (el) => {
+        for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+          const s = getComputedStyle(a);
+          if (s.transform !== "none" || s.filter !== "none" || s.perspective !== "none" ||
+              (s.backdropFilter && s.backdropFilter !== "none") ||
+              /(paint|layout|strict|content)/.test(s.contain || "") ||
+              /(transform|filter|perspective)/.test(s.willChange || "")) return false;
+        }
+        return true;
+      };
       document.querySelectorAll("body *").forEach((el) => {
         const c = getComputedStyle(el);
         if (c.position === "fixed" &&
             c.visibility !== "hidden" && c.display !== "none" && c.opacity !== "0") {
+          // Fixed descendants of a moved bar travel with it; don't hide or move them again.
+          for (let a = el.parentElement; a; a = a.parentElement) if (moved.has(a)) return;
           const r = el.getBoundingClientRect();
           if (r.width > 1 && r.height > 1 && (r.bottom <= 1 || r.top >= vh - 1)) {
             setStyleProp(el, "visibility", "hidden", "important");
             diag.hiddenOverlays++;
+          } else if (docH > vh + 40 && r.height > 1 && r.height <= vh * 0.4 &&
+                     r.width >= window.innerWidth * 0.5 &&          // a bar, not a corner widget
+                     Math.abs(r.bottom - vh) <= 2 && c.translate === "none" &&
+                     viewportAnchored(el)) {
+            setStyleProp(el, "translate", "0px " + (docH - vh) + "px", "important");
+            moved.add(el);
+            diag.movedBars++;
           }
         }
       });
